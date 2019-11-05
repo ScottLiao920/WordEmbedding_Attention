@@ -161,6 +161,7 @@ class pytorch_model(w2v_model, myDataset):
             self.device = torch.device('cuda:0')
         else:
             self.device = torch.device('cpu')
+        self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
 
     def read_vocab(self, path):
         with open(path, 'r') as f:
@@ -190,4 +191,17 @@ class pytorch_model(w2v_model, myDataset):
         with open('loss.txt', 'w') as f:
             f.write(str(loss_pool))
 
+    def get_embed(self, token):
+        return self.model.embedding(torch.Tensor([self.vocab.index(token)]).long().to(self.device))
+
     def most_similar(self, token, topk):
+        v_w1 = self.get_embed(token)
+        word_sim = {}
+        for i in range(len(self.vocab)):
+            word = self.vocab[i]
+            v_w2 = self.get_embed(word)
+            theta = self.cos_sim(v_w1, v_w2)
+            word_sim[word] = theta.detach().numpy()
+        words_sorted = sorted(word_sim.items(), key=lambda kv: kv[1], reverse=True)
+        for word, sim in words_sorted[:topk]:
+            yield (word, sim)
