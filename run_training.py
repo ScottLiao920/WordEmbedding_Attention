@@ -14,7 +14,6 @@ os.environ['cuda_visible_device'] = '0'
 with open('vocab.json', 'r') as f:
     vocab = json.load(f)
 
-
 settings = {
     'vocab_size': len(vocab),
     'window_size': 5,
@@ -28,7 +27,7 @@ settings = {
 
 
 class myDataset(Dataset):
-    
+
     def __init__(self, settings):
         self.window_size = settings['window_size']
         self.dim = settings['embedding_dim']
@@ -45,19 +44,19 @@ class myDataset(Dataset):
         for sent in sents:
             for i in range(len(sent)):
                 try:
-                    context = [self.word2id[word] for word in sent[max(0, i - self.window_size):i] + sent[i+1:min(
+                    context = [self.word2id[word] for word in sent[max(0, i - self.window_size):i] + sent[i + 1:min(
                         len(sent), i + 1 + self.window_size)]]
                     target = self.word2id[sent[i]]
-                    while len(context) < 2*self.window_size:
+                    while len(context) < 2 * self.window_size:
                         context.append(0)
                     self.data.append((target, context))
                 except KeyError:
                     print(sent[max(0, i - self.window_size):min(len(sent), i + 1 + self.window_size)])
         print('{} pairs found for training'.format(self.__len__()))
-        
+
     def __len__(self):
         return len(self.data)
-    
+
     def __getitem__(self, index):
         target = torch.Tensor([self.data[index][0]])
         context = torch.Tensor(self.data[index][1])
@@ -89,9 +88,9 @@ class w2v_model(nn.Module):
         Q = self.W_Q(target).view(self.batch_size, self.num_heads, self.dim_head)
         W = torch.zeros([self.batch_size, self.seq_len, self.num_heads, self.num_heads]).to(target.device)
         V = torch.zeros([self.batch_size, self.seq_len, self.num_hidden]).to(target.device)
-        
+
         for i in range(self.batch_size):
-            K_t = self.W_K(target[i]).view(self.num_heads, self.dim_head).transpose(0,1)
+            K_t = self.W_K(target[i]).view(self.num_heads, self.dim_head).transpose(0, 1)
             for j in range(self.seq_len):
                 W[i][j] = torch.matmul(Q[i], K_t) / (self.dim_head ** 0.5)
                 V[i][j] = self.W_V(target[j])
@@ -101,7 +100,7 @@ class w2v_model(nn.Module):
         context_vector = torch.sum(tmp, dim=1).view(self.batch_size, self.num_hidden)
         target_vector = self.W_V(target).view(self.batch_size, self.num_hidden)
         return target_vector, context_vector
-    
+
     def forward(self, t, c):
         target = self.embedding(t.long())
         context = self.embedding(c.long())
@@ -115,17 +114,14 @@ else:
     device = torch.device('cpu')
 print(device)
 
-
-
 model = w2v_model(settings).to(device)
 lossfunc = nn.MSELoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=settings['learning_rate'], momentum=0.9)
 
-
 model.train()
 start = time.time()
 for epoch in range(settings['num_epochs']):
-    for step in range(dataset.__len__()//settings['batch_size']):
+    for step in range(dataset.__len__() // settings['batch_size']):
         (t, c) = next(iter(dataloader))
         t, c = t.to(device), c.to(device)
         optimizer.zero_grad()
@@ -135,7 +131,6 @@ for epoch in range(settings['num_epochs']):
         optimizer.step()
         if step % 10 == 9:
             print('epoch {} step {} loss: {:.6f} time used for 10 steps {:6f}'.format(
-                epoch, step, loss.tolist(), time.time()-start))
+                epoch, step, loss.tolist(), time.time() - start))
             start = time.time()
     torch.save(model.state_dict(), 'MSE_SGD/epoch_{}.pt'.format(epoch))
-
