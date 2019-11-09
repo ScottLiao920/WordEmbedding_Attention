@@ -7,9 +7,12 @@ import time
 import torch
 import torch.nn as nn
 from nltk.corpus import gutenberg
+from tensorboardX import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
 
-os.environ['cuda_visible_device'] = '0'
+os.environ['cuda_visible_device'] = '1'
+
+torch.manual_seed(0)
 
 with open('vocab.json', 'r') as f:
     vocab = json.load(f)
@@ -64,8 +67,13 @@ class myDataset(Dataset):
 
 
 dataset = myDataset(settings)
-dataloader = DataLoader(dataset, batch_size=settings['batch_size'], shuffle=True)
+uni_leng = dataset.__len__() // 10
+leng = dataset.__len__()
+train_set, test_set, dev_set = torch.utils.data.random_split(dataset, [uni_leng*8, uni_leng, leng-9*uni_leng])
 
+train_loader = DataLoader(train_set, batch_size=settings['batch_size'], shuffle=True)
+test_loader = DataLoader(test_set, batch_size=settings['batch_size'], shuffle=True)
+dev_loader = DataLoader(dev_set, batch_size=settings['batch_size'], shuffle=True)
 
 class w2v_model(nn.Module):
     def __init__(self, settings):
@@ -117,20 +125,38 @@ print(device)
 model = w2v_model(settings).to(device)
 lossfunc = nn.MSELoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=settings['learning_rate'], momentum=0.9)
+writer = SummaryWriter()
+
 
 model.train()
-start = time.time()
+num_steps = train_set.__len__()//settings['batch_size']
 for epoch in range(settings['num_epochs']):
-    for step in range(dataset.__len__() // settings['batch_size']):
-        (t, c) = next(iter(dataloader))
+    for step in range(train_set.__len__()//settings['batch_size']):
+        start = time.time()
+        (t, c) = next(iter(train_loader))
         t, c = t.to(device), c.to(device)
         optimizer.zero_grad()
         v_t, v_c = model(t, c)
         loss = lossfunc(v_t, v_c.to(device))
         loss.backward()
         optimizer.step()
-        if step % 10 == 9:
+        if step % 10 == 0:
             print('epoch {} step {} loss: {:.6f} time used for 10 steps {:6f}'.format(
-                epoch, step, loss.tolist(), time.time() - start))
-            start = time.time()
+                epoch, step, loss.tolist(), time.time()-start))
+            writer.add_scalar('speed', time.time()-start, epoch*num_steps+step)
+
+            model.eval()
+            (t, c) = next(iter(test_loader))
+            t, c = t.to(device), c.to(device)
+            v_t, v_c = model(t, c)
+            test_loss = lossfunc(v_t, v_c.to(device))
+            (t, c) = next(iter(dev_loader))
+            t, c = t.to(device), c.to(device)
+            v_t, v_c = model(t, c)
+            dev_loss = lossfunc(v_t, v_c.to(device))
+            writer.add_scalars('loss', {'train': loss.tolist(),
+                                        'test': test_loss.tolist(),
+                                        'dev': dev_loss.tolist()
+                                       }, epoch*num_steps+step)
+            model.train()
     torch.save(model.state_dict(), 'MSE_SGD/epoch_{}.pt'.format(epoch))
