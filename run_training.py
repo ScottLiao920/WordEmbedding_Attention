@@ -25,7 +25,7 @@ settings = {
     'batch_size': 512,
     'num_heads': 12,
     'dim_head': 128,
-    'learning_rate': 2e-3
+    'learning_rate': 1e-3
 }
 
 
@@ -159,4 +159,4 @@ for epoch in range(settings['num_epochs']):
                                         'dev': dev_loss.tolist()
                                        }, epoch*num_steps+step)
             model.train()
-    torch.save(model.state_dict(), 'MSE_SGD/epoch_{}.pt'.format(epoch))
+    torch.save(model.state_dict(), 'MSE_SGD_new/epoch_{}.pt'.format(epoch))
