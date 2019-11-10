@@ -6,6 +6,7 @@ import time
 
 import gensim
 import nltk
+import numpy as np
 import torch
 import torch.nn as nn
 from nltk.corpus import gutenberg
@@ -18,6 +19,7 @@ class PreProcessing:
     def __init__(self):
         self.sents = []
         self.words = []
+        self.model = None
 
     def get_sents(self):
         #  Get all sentences in Project Gutenberg
@@ -25,17 +27,6 @@ class PreProcessing:
             for sent in gutenberg.sents(file):
                 self.sents.append(sent)
         print("Total number of sentences found: {}.\n".format(len(self.sents)))
-
-    def train_gensim(self, path, window, w2v_size, min_count, num_workers):
-        # Train a word2vec model using gensim for comparison
-        if not self.sents:
-            self.get_sents()
-        if not os.path.exists(path):
-            model = gensim.models.Word2Vec(self.sents, size=w2v_size, window=window, min_count=min_count,
-                                           workers=num_workers)
-            model.save(path)
-        else:
-            print("Gensim model already exists!")
 
     def get_words(self):
         # Create Vocabulary for all the words in Project Gutenberg
@@ -61,7 +52,34 @@ class PreProcessing:
             print("vocab file already exist")
 
 
-class myDataset(Dataset):
+class GensimModel(PreProcessing):
+    def __init__(self, path, settings):
+        if os.path.exists(path):
+            self.model = gensim.models.Word2Vec.load(path)
+        else:
+            print("gensim word2vec model doesn't exist! Training now.\n")
+            self.model = gensim.models.Word2Vec(self.sents, size=settings['embedding_dim'],
+                                                window=settings['window_size'],
+                                                min_count=1, iter=3, seed=0,
+                                                workers=4
+                                                )
+            self.model.save(path)
+
+    def most_similar(self, token, topk):
+        return self.model.wv.most_similar([token], topn=topk)
+
+    def get_embedding(self, token):
+        return self.model.wv.get_vector(token)
+
+    def cosine_similarity(self, token1, token2):
+        v_1, v_2 = self.get_embedding(token1), self.get_embedding(token2)
+        return np.dot(v_1, v_2) / (np.linalg.norm(v_1) * np.linalg.norm(v_2))
+
+    def get_distance(self, token1, token2):
+        return self.model.wv.distance(token1, token2)
+
+
+class MyDataset(Dataset):
     def __init__(self, settings):
         self.window_size = settings['window_size']
         self.dim = settings['embedding_dim']
@@ -97,7 +115,7 @@ class myDataset(Dataset):
         return target, context
 
 
-class w2v_model(nn.Module):
+class Word2VectorModel(nn.Module):
     def __init__(self, settings):
         super().__init__()
         self.vocab_size = settings['vocab_size']
@@ -138,7 +156,7 @@ class w2v_model(nn.Module):
         return v_t, v_c
 
 
-class w2v_model_CBoW(w2v_model):
+class Word2VectorModelCBoW(Word2VectorModel):
     def __init__(self, settings):
         super().__init__(settings)
         self.vocab_size = settings['vocab_size']
@@ -159,12 +177,12 @@ class w2v_model_CBoW(w2v_model):
     def forward(self, t, c):
         target = self.embedding(t.long())
         context = self.embedding(c.long())
-        v_t, v_c = w2v_model.attention(target, context)
+        v_t, v_c = Word2VectorModel.attention(target, context)
         pred = nn.Softmax(dim=1)(self.W_out(v_c))
         return pred
 
 
-class pytorch_model(w2v_model_CBoW, myDataset):
+class pytorch_model(Word2VectorModelCBoW, MyDataset):
     def __init__(self, mode, settings):
         self.vocab = self.read_vocab('vocab.json')
         if not settings:
@@ -184,22 +202,22 @@ class pytorch_model(w2v_model_CBoW, myDataset):
 
         # create model object
         if mode == 'MSE':
-            self.model = w2v_model(settings=self.settings)
+            self.model = Word2VectorModel(settings=self.settings)
             self.lossfunc = nn.MSELoss()
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
         elif mode == 'COS':
-            self.model = w2v_model(settings=self.settings)
+            self.model = Word2VectorModel(settings=self.settings)
             self.lossfunc = nn.CosineEmbeddingLoss()
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
         elif mode == 'CBoW':
-            self.model = w2v_model_CBoW(settings=self.settings)
+            self.model = Word2VectorModelCBoW(settings=self.settings)
             self.lossfunc = nn.CrossEntropyLoss()
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.settings['learning_rate'])
         else:
             raise Exception('mode must be one of CBoW, MSE, COS!')
 
         # create dataloader
-        dataset = myDataset(self.settings)
+        dataset = MyDataset(self.settings)
         uni_leng = dataset.__len__() // 10
         ttl_leng = dataset.__len__()
         train_set, test_set, dev_set = torch.utils.data.random_split(dataset,
@@ -259,7 +277,7 @@ class pytorch_model(w2v_model_CBoW, myDataset):
             torch.save(self.model.state_dict(), 'MSE_SGD/epoch_{}.pt'.format(epoch))
         print("Done training! Writing embedding into directory.")
 
-    def get_embed(self, token):
+    def get_embedding(self, token):
         return self.model.embedding(torch.Tensor([self.vocab.index(token)]).long().to(self.device))
 
     def most_similar(self, token, topk):
@@ -267,9 +285,13 @@ class pytorch_model(w2v_model_CBoW, myDataset):
         word_sim = {}
         for i in range(len(self.vocab)):
             word = self.vocab[i]
-            v_w2 = self.get_embed(word)
+            v_w2 = self.get_embedding(word)
             theta = self.cos_sim(v_w1, v_w2)
             word_sim[word] = theta.detach().numpy()
         words_sorted = sorted(word_sim.items(), key=lambda kv: kv[1], reverse=True)
         for word, sim in words_sorted[:topk]:
             yield (word, sim)
+
+    def cosine_similarity(self, token1, token2):
+        v_1, v_2 = self.get_embedding(token1), self.get_embedding(token2)
+        return self.cos_sim(v_1, v_2)
