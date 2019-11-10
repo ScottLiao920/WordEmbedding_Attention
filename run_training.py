@@ -133,7 +133,6 @@ num_steps = train_set.__len__()//settings['batch_size']
 for epoch in range(settings['num_epochs']):
     start = time.time()
     for step in range(train_set.__len__()//settings['batch_size']):
-        start = time.time()
         (t, c) = next(iter(train_loader))
         t, c = t.to(device), c.to(device)
         optimizer.zero_grad()
@@ -160,4 +159,5 @@ for epoch in range(settings['num_epochs']):
                                         'dev': dev_loss.tolist()
                                        }, epoch*num_steps+step)
             model.train()
+            start = time.time()
     torch.save(model.state_dict(), 'MSE_ckpts/epoch_{}.pt'.format(epoch))

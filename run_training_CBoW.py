@@ -160,4 +160,5 @@ for epoch in range(settings['num_epochs']):
                                         'dev': dev_loss.tolist()
                                         }, epoch * num_steps + step)
             model.train()
+            start = time.time()
     torch.save(model.state_dict(), 'CBoW_ckpts/epoch_{}.pt'.format(epoch))
