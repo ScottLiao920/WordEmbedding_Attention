@@ -69,11 +69,12 @@ class myDataset(Dataset):
 dataset = myDataset(settings)
 uni_leng = dataset.__len__() // 10
 leng = dataset.__len__()
-train_set, test_set, dev_set = torch.utils.data.random_split(dataset, [uni_leng*8, uni_leng, leng-9*uni_leng])
+train_set, test_set, dev_set = torch.utils.data.random_split(dataset, [uni_leng * 8, uni_leng, leng - 9 * uni_leng])
 
 train_loader = DataLoader(train_set, batch_size=settings['batch_size'], shuffle=True)
 test_loader = DataLoader(test_set, batch_size=settings['batch_size'], shuffle=True)
 dev_loader = DataLoader(dev_set, batch_size=settings['batch_size'], shuffle=True)
+
 
 class w2v_model(nn.Module):
     def __init__(self, settings):
@@ -106,14 +107,14 @@ class w2v_model(nn.Module):
         V = V.view(self.batch_size, self.seq_len, self.num_heads, self.dim_head)
         tmp = torch.matmul(W, V).view(self.batch_size, self.seq_len, self.num_hidden)
         context_vector = torch.sum(tmp, dim=1).view(self.batch_size, self.num_hidden)
-        target_vector = self.W_V(target).view(self.batch_size, self.num_hidden)
-        return target_vector, context_vector
+        return context_vector
 
     def forward(self, t, c):
         target = self.embedding(t.long())
         context = self.embedding(c.long())
-        v_t, v_c = self.attention(target, context)
-        return v_t, v_c
+        v_c = self.attention(target, context)
+        pred = nn.Softmax(dim=1)(self.W_out(v_c))
+        return pred
 
 
 if torch.cuda.is_available():
@@ -123,40 +124,39 @@ else:
 print(device)
 
 model = w2v_model(settings).to(device)
-lossfunc = nn.MSELoss()
+lossfunc = nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=settings['learning_rate'], momentum=0.9)
-writer = SummaryWriter('runs', comment='mse')
-
+writer = SummaryWriter('runs', comment='CBoW')
 
 model.train()
-num_steps = train_set.__len__()//settings['batch_size']
+num_steps = train_set.__len__() // settings['batch_size']
 for epoch in range(settings['num_epochs']):
-    for step in range(train_set.__len__()//settings['batch_size']):
+    for step in range(train_set.__len__() // settings['batch_size']):
         start = time.time()
         (t, c) = next(iter(train_loader))
         t, c = t.to(device), c.to(device)
         optimizer.zero_grad()
-        v_t, v_c = model(t, c)
-        loss = lossfunc(v_t, v_c.to(device))
+        pred = model(t, c)
+        loss = lossfunc(pred, t.long().view(-1))
         loss.backward()
         optimizer.step()
         if step % 10 == 0:
             print('epoch {} step {} loss: {:.6f} time used for 10 steps {:6f}'.format(
-                epoch, step, loss.tolist(), time.time()-start))
-            writer.add_scalar('speed', time.time()-start, epoch*num_steps+step)
+                epoch, step, loss.tolist(), time.time() - start))
+            writer.add_scalar('speed', time.time() - start, epoch * num_steps + step)
 
             model.eval()
             (t, c) = next(iter(test_loader))
             t, c = t.to(device), c.to(device)
-            v_t, v_c = model(t, c)
-            test_loss = lossfunc(v_t, v_c.to(device))
+            pred = model(t, c)
+            test_loss = lossfunc(pred, t.long().view(-1))
             (t, c) = next(iter(dev_loader))
             t, c = t.to(device), c.to(device)
-            v_t, v_c = model(t, c)
-            dev_loss = lossfunc(v_t, v_c.to(device))
+            pred = model(t, c)
+            dev_loss = lossfunc(pred, t.long().view(-1))
             writer.add_scalars('loss', {'train': loss.tolist(),
                                         'test': test_loss.tolist(),
                                         'dev': dev_loss.tolist()
-                                       }, epoch*num_steps+step)
+                                        }, epoch * num_steps + step)
             model.train()
-    torch.save(model.state_dict(), 'MSE_SGD_new/epoch_{}.pt'.format(epoch))
+    torch.save(model.state_dict(), 'CBoW_SGD/epoch_{}.pt'.format(epoch))
