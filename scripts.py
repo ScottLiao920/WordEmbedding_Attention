@@ -61,6 +61,42 @@ class PreProcessing:
             print("vocab file already exist")
 
 
+class myDataset(Dataset):
+    def __init__(self, settings):
+        self.window_size = settings['window_size']
+        self.dim = settings['embedding_dim']
+        # read from project gutenberg
+        sents = []
+        list(map(sents.extend, list(map(gutenberg.sents, gutenberg.fileids()))))
+        print('\n{} sentences fetched.'.format(len(sents)))
+        # load vocabulary file
+        with open('vocab.json', 'r') as f:
+            vocab = json.load(f)
+        print('\n{} unique words found in corpus'.format(len(vocab)))
+        self.word2id = dict((vocab[i], i) for i in range(len(vocab)))
+        self.data = []
+        for sent in sents:
+            for i in range(len(sent)):
+                try:
+                    context = [self.word2id[word] for word in sent[max(0, i - self.window_size):i] + sent[i + 1:min(
+                        len(sent), i + 1 + self.window_size)]]
+                    target = self.word2id[sent[i]]
+                    while len(context) < 2 * self.window_size:
+                        context.append(0)
+                    self.data.append((target, context))
+                except KeyError:
+                    print(sent[max(0, i - self.window_size):min(len(sent), i + 1 + self.window_size)])
+        print('{} pairs found for training'.format(self.__len__()))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        target = torch.Tensor([self.data[index][0]])
+        context = torch.Tensor(self.data[index][1])
+        return target, context
+
+
 class w2v_model(nn.Module):
     def __init__(self, settings):
         super(w2v_model, self).__init__()
@@ -84,10 +120,10 @@ class w2v_model(nn.Module):
         V = torch.zeros([self.batch_size, self.seq_len, self.num_hidden]).to(target.device)
 
         for i in range(self.batch_size):
-            K_t = self.W_K(target[i]).view(self.num_heads, self.dim_head).transpose(0, 1)
             for j in range(self.seq_len):
+                K_t = self.W_K(context[i][j]).view(self.num_heads, self.dim_head).transpose(0, 1)
                 W[i][j] = torch.matmul(Q[i], K_t) / (self.dim_head ** 0.5)
-                V[i][j] = self.W_V(target[j])
+                V[i][j] = self.W_V(context[i][j])
         W = nn.Softmax(dim=-1)(W)
         V = V.view(self.batch_size, self.seq_len, self.num_heads, self.dim_head)
         tmp = torch.matmul(W, V).view(self.batch_size, self.seq_len, self.num_hidden)
@@ -144,45 +180,7 @@ class w2v_model_CBoW(nn.Module):
         return pred
 
 
-class myDataset(Dataset):
-
-    def __init__(self, settings):
-        self.window_size = settings['window_size']
-        self.dim = settings['embedding_dim']
-        # read from project gutenberg
-        sents = []
-        list(map(sents.extend, list(map(gutenberg.sents, gutenberg.fileids()))))
-        print('\n{} sentences fetched.'.format(len(sents)))
-        # load vocabulary file
-        with open('vocab.json', 'r') as f:
-            vocab = json.load(f)
-        print('\n{} unique words found in corpus'.format(len(vocab)))
-        self.word2id = dict((vocab[i], i) for i in range(len(vocab)))
-        self.data = []
-        for sent in sents:
-            for i in range(len(sent)):
-                try:
-                    context = [self.word2id[word] for word in sent[max(0, i - self.window_size):i] + sent[i + 1:min(
-                        len(sent), i + 1 + self.window_size)]]
-                    target = self.word2id[sent[i]]
-                    while len(context) < 2 * self.window_size:
-                        context.append(0)
-                    self.data.append((target, context))
-                except KeyError:
-                    print(sent[max(0, i - self.window_size):min(len(sent), i + 1 + self.window_size)])
-        print('{} pairs found for training'.format(self.__len__()))
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, index):
-        target = torch.Tensor([self.data[index][0]])
-        context = torch.Tensor(self.data[index][1])
-        return target, context
-
-
 class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
-
     def __init__(self, mode, settings):
         self.vocab = self.read_vocab('vocab.json')
         if not settings:
@@ -198,6 +196,8 @@ class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
             }
         else:
             self.settings = settings
+        print(self.settings)
+        super(pytorch_model, self).__init__(self.settings)
 
         # create model object
         if mode == 'MSE':
@@ -211,7 +211,7 @@ class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
         elif mode == 'CBoW':
             self.model = w2v_model_CBoW(settings=self.settings)
             self.lossfunc = nn.CrossEntropyLoss()
-            self.optimizer = torch.optim.adam(self.model.parameters(), lr=self.settings['learning_rate'])
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.settings['learning_rate'])
         else:
             raise Exception('mode must be one of CBoW, MSE, COS!')
 
@@ -232,7 +232,7 @@ class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
             self.device = torch.device('cpu')
         self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
         self.mode = mode
-        self.writer = SummaryWriter('logs/'+mode)
+        self.writer = SummaryWriter('logs/' + mode)
 
     def read_vocab(self, path):
         with open(path, 'r') as f:
@@ -268,15 +268,13 @@ class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
                     (t, c) = next(iter(self.dev_loader))
                     dev_loss = self.forward_pass(t, c)
                     self.writer.add_scalars('loss', {
-                        'train':loss.tolist(),
-                        'test':test_loss.tolist(),
-                        'dev':dev_loss.tolist()
-                     }, epoch*num_steps+step)
+                        'train': loss.tolist(),
+                        'test': test_loss.tolist(),
+                        'dev': dev_loss.tolist()
+                    }, epoch * num_steps + step)
                     start = time.time()
             torch.save(self.model.state_dict(), 'MSE_SGD/epoch_{}.pt'.format(epoch))
         print("Done training! Writing embedding into directory.")
-        self.writer.add_graph(self.model, (t, c))
-
 
     def get_embed(self, token):
         return self.model.embedding(torch.Tensor([self.vocab.index(token)]).long().to(self.device))
