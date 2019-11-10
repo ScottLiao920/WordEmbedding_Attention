@@ -85,7 +85,7 @@ class myDataset(Dataset):
                         context.append(0)
                     self.data.append((target, context))
                 except KeyError:
-                    print(sent[max(0, i - self.window_size):min(len(sent), i + 1 + self.window_size)])
+                    pass
         print('{} pairs found for training'.format(self.__len__()))
 
     def __len__(self):
@@ -99,7 +99,7 @@ class myDataset(Dataset):
 
 class w2v_model(nn.Module):
     def __init__(self, settings):
-        super(w2v_model, self).__init__()
+        super().__init__()
         self.vocab_size = settings['vocab_size']
         self.batch_size = settings['batch_size']
         self.num_heads = settings['num_heads']
@@ -140,7 +140,7 @@ class w2v_model(nn.Module):
 
 class w2v_model_CBoW(nn.Module):
     def __init__(self, settings):
-        super(w2v_model_CBoW, self).__init__()
+        super().__init__()
         self.vocab_size = settings['vocab_size']
         self.batch_size = settings['batch_size']
         self.num_heads = settings['num_heads']
@@ -197,15 +197,15 @@ class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
         else:
             self.settings = settings
         print(self.settings)
-        super(pytorch_model, self).__init__(self.settings)
+        super().__init__(self.settings)
 
         # create model object
         if mode == 'MSE':
-            self.model = w2v_model(settings=self.settings)
+            self.model = w2v_model  # (settings=self.settings)
             self.lossfunc = nn.MSELoss()
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
         elif mode == 'COS':
-            self.model = w2v_model(settings=self.settings)
+            self.model = w2v_model  # (settings=self.settings)
             self.lossfunc = nn.CosineEmbeddingLoss()
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
         elif mode == 'CBoW':
