@@ -232,7 +232,7 @@ class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
             self.device = torch.device('cpu')
         self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
         self.mode = mode
-        self.writer = SummaryWriter(mode)
+        self.writer = SummaryWriter('log/'+mode)
 
     def read_vocab(self, path):
         with open(path, 'r') as f:
