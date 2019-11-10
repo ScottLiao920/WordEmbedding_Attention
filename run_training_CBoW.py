@@ -91,6 +91,7 @@ class w2v_model(nn.Module):
         self.W_Q = nn.Linear(self.embed_dim, self.num_hidden)
         self.W_K = nn.Linear(self.embed_dim, self.num_hidden)
         self.W_V = nn.Linear(self.embed_dim, self.num_hidden)
+        self.W_out = nn.Linear(self.num_hidden, self.vocab_size)
         self.cos_sim = nn.CosineSimilarity(dim=-1)
 
     def attention(self, target, context):
