@@ -127,7 +127,7 @@ print(device)
 model = w2v_model(settings).to(device)
 lossfunc = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=settings['learning_rate'])
-writer = SummaryWriter('runs', comment='CBoW')
+writer = SummaryWriter('logs/CBoW')
 
 model.train()
 num_steps = train_set.__len__() // settings['batch_size']

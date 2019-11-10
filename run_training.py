@@ -125,7 +125,7 @@ print(device)
 model = w2v_model(settings).to(device)
 lossfunc = nn.MSELoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=settings['learning_rate'], momentum=0.9)
-writer = SummaryWriter('runs', comment='mse')
+writer = SummaryWriter('logs/MSE')
 
 
 model.train()
