@@ -100,6 +100,48 @@ class w2v_model(nn.Module):
         v_t, v_c = self.attention(target, context)
         return v_t, v_c
 
+class w2v_model_CBoW(nn.Module):
+    def __init__(self, settings):
+        super(w2v_model_CBoW, self).__init__()
+        self.vocab_size = settings['vocab_size']
+        self.batch_size = settings['batch_size']
+        self.num_heads = settings['num_heads']
+        self.dim_head = settings['dim_head']
+        self.num_hidden = self.dim_head * self.num_heads
+        self.seq_len = settings['window_size'] * 2
+        self.embed_dim = settings['embedding_dim']
+
+        self.embedding = nn.Embedding(self.vocab_size, self.embed_dim)
+        self.W_Q = nn.Linear(self.embed_dim, self.num_hidden)
+        self.W_K = nn.Linear(self.embed_dim, self.num_hidden)
+        self.W_V = nn.Linear(self.embed_dim, self.num_hidden)
+        self.W_out = nn.Linear(self.num_hidden, self.vocab_size)
+        self.cos_sim = nn.CosineSimilarity(dim=-1)
+
+    def attention(self, target, context):
+        Q = self.W_Q(target).view(self.batch_size, self.num_heads, self.dim_head)
+        W = torch.zeros([self.batch_size, self.seq_len, self.num_heads, self.num_heads]).to(target.device)
+        V = torch.zeros([self.batch_size, self.seq_len, self.num_hidden]).to(target.device)
+
+        for i in range(self.batch_size):
+            for j in range(self.seq_len):
+                K_t = self.W_K(context[i][j]).view(self.num_heads, self.dim_head).transpose(0, 1)
+                W[i][j] = torch.matmul(Q[i], K_t) / (self.dim_head ** 0.5)
+                V[i][j] = self.W_V(context[i][j])
+        W = nn.Softmax(dim=-1)(W)
+        V = V.view(self.batch_size, self.seq_len, self.num_heads, self.dim_head)
+        tmp = torch.matmul(W, V).view(self.batch_size, self.seq_len, self.num_hidden)
+        context_vector = torch.sum(tmp, dim=1).view(self.batch_size, self.num_hidden)
+        return context_vector
+
+    def forward(self, t, c):
+        target = self.embedding(t.long())
+        context = self.embedding(c.long())
+        v_c = self.attention(target, context)
+        pred = nn.Softmax(dim=1)(self.W_out(v_c))
+        return pred
+
+
 
 class myDataset(Dataset):
 
@@ -138,9 +180,9 @@ class myDataset(Dataset):
         return target, context
 
 
-class pytorch_model(w2v_model, myDataset):
+class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
 
-    def __init__(self):
+    def __init__(self, mode):
         self.vocab = self.read_vocab('vocab.json')
 
         self.settings = {
@@ -153,8 +195,9 @@ class pytorch_model(w2v_model, myDataset):
             'dim_head': 128,
             'learning_rate': 2e-3
         }
-        self.model = w2v_model(settings=self.settings)
-        self.lossfunc = nn.MSELoss()
+        if self.mode == 'MSE':
+            self.model = w2v_model(settings=self.settings)
+            self.lossfunc = nn.MSELoss()
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
         self.dataloader = DataLoader(myDataset(self.settings), batch_size=self.settings['batch_size'], shuffle=True)
         if torch.cuda.is_available():

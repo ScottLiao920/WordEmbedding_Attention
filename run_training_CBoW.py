@@ -126,7 +126,7 @@ print(device)
 
 model = w2v_model(settings).to(device)
 lossfunc = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=settings['learning_rate'], momentum=0.9)
+optimizer = torch.optim.Adam(model.parameters(), lr=settings['learning_rate'])
 writer = SummaryWriter('runs', comment='CBoW')
 
 model.train()
