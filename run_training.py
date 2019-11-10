@@ -131,6 +131,7 @@ writer = SummaryWriter('runs', comment='mse')
 model.train()
 num_steps = train_set.__len__()//settings['batch_size']
 for epoch in range(settings['num_epochs']):
+    start = time.time()
     for step in range(train_set.__len__()//settings['batch_size']):
         start = time.time()
         (t, c) = next(iter(train_loader))

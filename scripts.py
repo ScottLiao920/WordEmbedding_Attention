@@ -9,6 +9,7 @@ import nltk
 import torch
 import torch.nn as nn
 from nltk.corpus import gutenberg
+from tensorboardX import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
 
 
@@ -100,6 +101,7 @@ class w2v_model(nn.Module):
         v_t, v_c = self.attention(target, context)
         return v_t, v_c
 
+
 class w2v_model_CBoW(nn.Module):
     def __init__(self, settings):
         super(w2v_model_CBoW, self).__init__()
@@ -142,7 +144,6 @@ class w2v_model_CBoW(nn.Module):
         return pred
 
 
-
 class myDataset(Dataset):
 
     def __init__(self, settings):
@@ -182,57 +183,100 @@ class myDataset(Dataset):
 
 class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
 
-    def __init__(self, mode):
+    def __init__(self, mode, settings):
         self.vocab = self.read_vocab('vocab.json')
+        if not settings:
+            self.settings = {
+                'vocab_size': len(self.vocab),
+                'window_size': 5,
+                'num_epochs': 3,
+                'embedding_dim': 50,
+                'batch_size': 512,
+                'num_heads': 12,
+                'dim_head': 128,
+                'learning_rate': 2e-3
+            }
+        else:
+            self.settings = settings
 
-        self.settings = {
-            'vocab_size': len(self.vocab),
-            'window_size': 5,
-            'num_epochs': 100,
-            'embedding_dim': 50,
-            'batch_size': 512,
-            'num_heads': 12,
-            'dim_head': 128,
-            'learning_rate': 2e-3
-        }
-        if self.mode == 'MSE':
+        # create model object
+        if mode == 'MSE':
             self.model = w2v_model(settings=self.settings)
             self.lossfunc = nn.MSELoss()
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
-        self.dataloader = DataLoader(myDataset(self.settings), batch_size=self.settings['batch_size'], shuffle=True)
+            self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
+        elif mode == 'COS':
+            self.model = w2v_model(settings=self.settings)
+            self.lossfunc = nn.CosineEmbeddingLoss()
+            self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
+        elif mode == 'CBoW':
+            self.model = w2v_model_CBoW(settings=self.settings)
+            self.lossfunc = nn.CrossEntropyLoss()
+            self.optimizer = torch.optim.adam(self.model.parameters(), lr=self.settings['learning_rate'])
+        else:
+            raise Exception('mode must be one of CBoW, MSE, COS!')
+
+        # create dataloader
+        dataset = myDataset(self.settings)
+        uni_leng = dataset.__len__() // 10
+        ttl_leng = dataset.__len__()
+        train_set, test_set, dev_set = torch.utils.data.random_split(dataset,
+                                                                     [uni_leng * 8, uni_leng, ttl_leng - 9 * uni_leng])
+
+        self.train_loader = DataLoader(train_set, batch_size=self.settings['batch_size'], shuffle=True)
+        self.test_loader = DataLoader(test_set, batch_size=self.settings['batch_size'], shuffle=True)
+        self.dev_loader = DataLoader(dev_set, batch_size=self.settings['batch_size'], shuffle=True)
+
         if torch.cuda.is_available():
             self.device = torch.device('cuda:0')
         else:
             self.device = torch.device('cpu')
         self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
+        self.mode = mode
+        self.writer = SummaryWriter(mode)
 
     def read_vocab(self, path):
         with open(path, 'r') as f:
             tmp = json.load(f)
         return tmp
 
-    def training(self):
-        loss_pool = []
+    def forward_pass(self, t, c):
+        if self.mode != 'CBoW':
+            v_t, v_c = self.model(t, c)
+            loss = self.lossfunc(v_t, v_c.to(self.device))
+        else:
+            pred = self.model(t, c)
+            loss = self.lossfunc(pred, t.long().view(-1))
+        return loss
+
+    def train(self):
         self.model.train()
-        start = time.time()
+        num_steps = self.train_loader.dataset.__len__() // self.settings['batch_size']
         for epoch in range(self.settings['num_epochs']):
-            tmp = []
-            for step in range(self.dataset.__len__() // self.settings['batch_size']):
-                (t, c) = next(iter(self.dataloader))
+            start = time.time()
+            for step in range(num_steps):
+                (t, c) = next(iter(self.train_loader))
                 t, c = t.to(self.device), c.to(self.device)
                 self.optimizer.zero_grad()
-                v_t, v_c = self.model(t, c)
-                loss = self.lossfunc(v_t, v_c.to(self.device))
+                loss = self.forward_pass(t, c)
                 loss.backward()
-                tmp.append(loss.tolist())
                 self.optimizer.step()
-                if step % 10 == 9:
-                    print('epoch {} step {} loss: {:.6f} time used for 10 steps {:6f}'.format(
+                if step % 100 == 0:
+                    print('epoch {} step {} loss: {:.6f}, time used for 100 steps: {:6f} seconds'.format(
                         epoch, step, loss.tolist(), time.time() - start))
+                    (t, c) = next(iter(self.test_loader))
+                    test_loss = self.forward_pass(t, c)
+                    (t, c) = next(iter(self.dev_loader))
+                    dev_loss = self.forward_pass(t, c)
+                    self.writer.add_scalars('loss', {
+                        'train':loss.tolist(),
+                        'test':test_loss.tolist(),
+                        'dev':dev_loss.tolist()
+                     }, epoch*num_steps+step)
                     start = time.time()
             torch.save(self.model.state_dict(), 'MSE_SGD/epoch_{}.pt'.format(epoch))
-        with open('loss.txt', 'w') as f:
-            f.write(str(loss_pool))
+        print("Done training! Writing embedding into directory.")
+        self.writer.add_graph(self.model, (t, c))
+
 
     def get_embed(self, token):
         return self.model.embedding(torch.Tensor([self.vocab.index(token)]).long().to(self.device))

@@ -132,8 +132,8 @@ writer = SummaryWriter('runs', comment='CBoW')
 model.train()
 num_steps = train_set.__len__() // settings['batch_size']
 for epoch in range(settings['num_epochs']):
+    start = time.time()
     for step in range(train_set.__len__() // settings['batch_size']):
-        start = time.time()
         (t, c) = next(iter(train_loader))
         t, c = t.to(device), c.to(device)
         optimizer.zero_grad()
