@@ -69,11 +69,12 @@ class myDataset(Dataset):
 dataset = myDataset(settings)
 uni_leng = dataset.__len__() // 10
 leng = dataset.__len__()
-train_set, test_set, dev_set = torch.utils.data.random_split(dataset, [uni_leng*8, uni_leng, leng-9*uni_leng])
+train_set, test_set, dev_set = torch.utils.data.random_split(dataset, [uni_leng * 8, uni_leng, leng - 9 * uni_leng])
 
 train_loader = DataLoader(train_set, batch_size=settings['batch_size'], shuffle=True)
 test_loader = DataLoader(test_set, batch_size=settings['batch_size'], shuffle=True)
 dev_loader = DataLoader(dev_set, batch_size=settings['batch_size'], shuffle=True)
+
 
 class w2v_model(nn.Module):
     def __init__(self, settings):
@@ -127,12 +128,11 @@ lossfunc = nn.MSELoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=settings['learning_rate'], momentum=0.9)
 writer = SummaryWriter('logs/MSE')
 
-
 model.train()
-num_steps = train_set.__len__()//settings['batch_size']
+num_steps = train_set.__len__() // settings['batch_size']
 for epoch in range(settings['num_epochs']):
     start = time.time()
-    for step in range(train_set.__len__()//settings['batch_size']):
+    for step in range(train_set.__len__() // settings['batch_size']):
         (t, c) = next(iter(train_loader))
         t, c = t.to(device), c.to(device)
         optimizer.zero_grad()
@@ -142,8 +142,8 @@ for epoch in range(settings['num_epochs']):
         optimizer.step()
         if step % 10 == 0:
             print('epoch {} step {} loss: {:.6f} time used for 10 steps {:6f}'.format(
-                epoch, step, loss.tolist(), time.time()-start))
-            writer.add_scalar('speed', time.time()-start, epoch*num_steps+step)
+                epoch, step, loss.tolist(), time.time() - start))
+            writer.add_scalar('speed', time.time() - start, epoch * num_steps + step)
 
             model.eval()
             (t, c) = next(iter(test_loader))
@@ -157,7 +157,7 @@ for epoch in range(settings['num_epochs']):
             writer.add_scalars('loss', {'train': loss.tolist(),
                                         'test': test_loss.tolist(),
                                         'dev': dev_loss.tolist()
-                                       }, epoch*num_steps+step)
+                                        }, epoch * num_steps + step)
             model.train()
             start = time.time()
     torch.save(model.state_dict(), 'MSE_ckpts/epoch_{}.pt'.format(epoch))
