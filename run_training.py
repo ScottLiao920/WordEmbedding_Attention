@@ -160,4 +160,4 @@ for epoch in range(settings['num_epochs']):
                                         'dev': dev_loss.tolist()
                                        }, epoch*num_steps+step)
             model.train()
-    torch.save(model.state_dict(), 'MSE_SGD_new/epoch_{}.pt'.format(epoch))
+    torch.save(model.state_dict(), 'MSE_ckpts/epoch_{}.pt'.format(epoch))

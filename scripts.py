@@ -86,7 +86,7 @@ class myDataset(Dataset):
                     self.data.append((target, context))
                 except KeyError:
                     pass
-        print('{} pairs found for training'.format(self.__len__()))
+        print('\n{} pairs found for training'.format(self.__len__()))
 
     def __len__(self):
         return len(self.data)
@@ -138,9 +138,9 @@ class w2v_model(nn.Module):
         return v_t, v_c
 
 
-class w2v_model_CBoW(nn.Module):
+class w2v_model_CBoW(w2v_model):
     def __init__(self, settings):
-        super().__init__()
+        super().__init__(settings)
         self.vocab_size = settings['vocab_size']
         self.batch_size = settings['batch_size']
         self.num_heads = settings['num_heads']
@@ -156,31 +156,15 @@ class w2v_model_CBoW(nn.Module):
         self.W_out = nn.Linear(self.num_hidden, self.vocab_size)
         self.cos_sim = nn.CosineSimilarity(dim=-1)
 
-    def attention(self, target, context):
-        Q = self.W_Q(target).view(self.batch_size, self.num_heads, self.dim_head)
-        W = torch.zeros([self.batch_size, self.seq_len, self.num_heads, self.num_heads]).to(target.device)
-        V = torch.zeros([self.batch_size, self.seq_len, self.num_hidden]).to(target.device)
-
-        for i in range(self.batch_size):
-            for j in range(self.seq_len):
-                K_t = self.W_K(context[i][j]).view(self.num_heads, self.dim_head).transpose(0, 1)
-                W[i][j] = torch.matmul(Q[i], K_t) / (self.dim_head ** 0.5)
-                V[i][j] = self.W_V(context[i][j])
-        W = nn.Softmax(dim=-1)(W)
-        V = V.view(self.batch_size, self.seq_len, self.num_heads, self.dim_head)
-        tmp = torch.matmul(W, V).view(self.batch_size, self.seq_len, self.num_hidden)
-        context_vector = torch.sum(tmp, dim=1).view(self.batch_size, self.num_hidden)
-        return context_vector
-
     def forward(self, t, c):
         target = self.embedding(t.long())
         context = self.embedding(c.long())
-        v_c = self.attention(target, context)
+        v_t, v_c = w2v_model.attention(target, context)
         pred = nn.Softmax(dim=1)(self.W_out(v_c))
         return pred
 
 
-class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
+class pytorch_model(w2v_model_CBoW, myDataset):
     def __init__(self, mode, settings):
         self.vocab = self.read_vocab('vocab.json')
         if not settings:
@@ -196,16 +180,15 @@ class pytorch_model(w2v_model, w2v_model_CBoW, myDataset):
             }
         else:
             self.settings = settings
-        print(self.settings)
         super().__init__(self.settings)
 
         # create model object
         if mode == 'MSE':
-            self.model = w2v_model  # (settings=self.settings)
+            self.model = w2v_model(settings=self.settings)
             self.lossfunc = nn.MSELoss()
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
         elif mode == 'COS':
-            self.model = w2v_model  # (settings=self.settings)
+            self.model = w2v_model(settings=self.settings)
             self.lossfunc = nn.CosineEmbeddingLoss()
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.settings['learning_rate'], momentum=0.9)
         elif mode == 'CBoW':
