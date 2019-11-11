@@ -140,8 +140,8 @@ for epoch in range(settings['num_epochs']):
         loss = lossfunc(v_t, v_c.to(device))
         loss.backward()
         optimizer.step()
-        if step % 10 == 0:
-            print('epoch {} step {} loss: {:.6f} time used for 10 steps {:6f}'.format(
+        if step % 100 == 0:
+            print('epoch {} step {} loss: {:.6f} time used for 100 steps: {:6f} seconds'.format(
                 epoch, step, loss.tolist(), time.time() - start))
             writer.add_scalar('speed', time.time() - start, epoch * num_steps + step)
 
